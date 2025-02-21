@@ -1238,6 +1238,8 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc,
     DECL_OPTION("-compiler-include", CbVal, callStrSetter(&V3Options::addCompilerIncludes));
     DECL_OPTION("-converge-limit", Set, &m_convergeLimit);
     DECL_OPTION("-coverage", CbOnOff, [this](bool flag) { coverage(flag); });
+    DECL_OPTION("-coverage-expr", OnOff, &m_coverageExpr);
+    DECL_OPTION("-coverage-expr-max", Set, &m_coverageExprMax);
     DECL_OPTION("-coverage-line", OnOff, &m_coverageLine);
     DECL_OPTION("-coverage-max-width", Set, &m_coverageMaxWidth);
     DECL_OPTION("-coverage-toggle", OnOff, &m_coverageToggle);
@@ -1502,6 +1504,7 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc,
         validateIdentifier(fl, valp, "--prefix");
         m_prefix = valp;
     });
+    DECL_OPTION("-preproc-resolve", OnOff, &m_preprocResolve);
     DECL_OPTION("-preproc-token-limit", CbVal, [this, fl](const char* valp) {
         m_preprocTokenLimit = std::atoi(valp);
         if (m_preprocTokenLimit <= 0) fl->v3error("--preproc-token-limit must be > 0: " << valp);
