@@ -602,22 +602,28 @@ class EmitVBaseVisitorConst VL_NOT_FINAL : public EmitCBaseVisitorConst {
     }
     void visit(AstSel* nodep) override {
         iterateAndNextConstNull(nodep->fromp());
+        int offset = 0;
+        AstNodeDType* const dtypep = nodep->fromp()->dtypep();
+        if (VN_IS(dtypep, BasicDType)) {
+            AstBasicDType* const basicDtypep = VN_AS(dtypep, BasicDType);
+            offset = basicDtypep->lo();
+        }
         puts("[");
         if (VN_IS(nodep->lsbp(), Const)) {
             if (nodep->widthp()->isOne()) {
-                if (VN_IS(nodep->lsbp(), Const)) {
-                    puts(cvtToStr(VN_AS(nodep->lsbp(), Const)->toSInt()));
-                } else {
-                    iterateAndNextConstNull(nodep->lsbp());
-                }
+                puts(cvtToStr(VN_AS(nodep->lsbp(), Const)->toSInt() + offset));
             } else {
                 puts(cvtToStr(VN_AS(nodep->lsbp(), Const)->toSInt()
-                              + VN_AS(nodep->widthp(), Const)->toSInt() - 1));
+                              + VN_AS(nodep->widthp(), Const)->toSInt() + offset - 1));
                 puts(":");
-                puts(cvtToStr(VN_AS(nodep->lsbp(), Const)->toSInt()));
+                puts(cvtToStr(VN_AS(nodep->lsbp(), Const)->toSInt() + offset));
             }
         } else {
             iterateAndNextConstNull(nodep->lsbp());
+            if (offset != 0) {
+                puts(" + ");
+                puts(cvtToStr(offset));
+            }
             putfs(nodep, "+:");
             iterateAndNextConstNull(nodep->widthp());
             puts("]");
@@ -720,12 +726,49 @@ class EmitVBaseVisitorConst VL_NOT_FINAL : public EmitCBaseVisitorConst {
             iterateConst(nodep->subDTypep());  // For post's key
         }
     }
+    void visit(AstIfaceRefDType* nodep) override {
+        if (m_arrayPost) {
+            puts(" (");
+            if (nodep->cellp()) {
+                iterateConst(nodep->cellp());
+            } else {
+                puts("????");
+            }
+            puts(")");
+            return;
+        }
+        puts(nodep->ifaceName());
+    }
     void visit(AstRefDType* nodep) override {
         if (nodep->subDTypep()) {
             iterateConst(nodep->skipRefp());
         } else {
             puts("\n???? // "s + nodep->prettyTypeName() + " -> UNLINKED\n");
         }
+    }
+    void visit(AstModport* nodep) override {
+        puts(nodep->verilogKwd());
+        puts(" ");
+        puts(nodep->prettyName());
+        puts(" (\n");
+        if (nodep->varsp()) {
+            iterateConst(nodep->varsp());
+        } else {
+            puts("????");
+        }
+        puts(");\n");
+    }
+    void visit(AstModportVarRef* nodep) override {
+        puts(nodep->direction().verilogKwd());
+        puts(" ");
+        if (nodep->varp()) {
+            VL_RESTORER(m_suppressVarSemi);
+            m_suppressVarSemi = true;
+            iterateConst(nodep->varp());
+        } else {
+            puts(nodep->prettyName());
+        }
+        if (nodep->nextp()) puts(", ");
     }
     void visit(AstNodeUOrStructDType* nodep) override {
         if (m_arrayPost) return;
@@ -809,7 +852,7 @@ class EmitVBaseVisitorConst VL_NOT_FINAL : public EmitCBaseVisitorConst {
         }
     }
     void visit(AstVarXRef* nodep) override {
-        putfs(nodep, nodep->dotted());
+        putfs(nodep, nodep->prettyName(nodep->dotted()));
         puts(".");
         if (nodep->varp()) {
             puts(nodep->varp()->prettyName());

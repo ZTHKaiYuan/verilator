@@ -25,7 +25,9 @@ class Cls;
    endfunction
 endclass
 
-interface Iface;
+interface Iface (
+    input clk
+);
    logic ifsig;
    modport mp(input ifsig);
 endinterface
@@ -61,6 +63,14 @@ module t (/*AUTOARG*/
    integer i1;
    int array[3];
    initial array = '{1,2,3};
+   logic [63:32] downto_32 = '0;
+
+   function automatic int ident(int value);
+       return value;
+   endfunction
+
+   Iface the_ifaces [3:0] (.*);
+
    initial begin
       if ($test$plusargs("HELLO")) $display("Hello argument found.");
       if (Pkg::FOO == 0) $write("");
@@ -69,6 +79,12 @@ module t (/*AUTOARG*/
          $display("value was %d", i1);
       else
          $display("+TEST= not found");
+      if (downto_32[33]) $write("");
+      if (downto_32[ident(33)]) $write("");
+      if (|downto_32[48:40]) $write("");
+      if (|downto_32[55+:3]) $write("");
+      if (|downto_32[60-:7]) $write("");
+      if (the_ifaces[2].ifsig) $write("");
    end
 
    bit [6:5][4:3][2:1] arraymanyd[10:11][12:13][14:15];
@@ -106,7 +122,7 @@ module t (/*AUTOARG*/
       return v == 0 ? 99 : ~v + 1;
    endfunction
 
-   sub sub();
+   sub sub(.*);
 
    initial begin
       int other;
@@ -240,7 +256,7 @@ module t (/*AUTOARG*/
    end
 endmodule
 
-module sub();
+module sub(input logic clk);
    task inc(input int i, output int o);
       o = {1'b0, i[31:1]} + 32'd1;
    endtask
