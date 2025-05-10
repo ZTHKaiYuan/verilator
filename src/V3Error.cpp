@@ -49,6 +49,14 @@ V3ErrorCode::V3ErrorCode(const char* msgp) {
     m_e = V3ErrorCode::EC_ERROR;
 }
 
+string V3ErrorCode::url() const {
+    if (m_e < V3ErrorCode::EC_FIRST_NAMED) {
+        return "https://verilator.org/verilator_doc.html"s + "?v=" + PACKAGE_VERSION_NUMBER_STRING;
+    } else {
+        return "https://verilator.org/warn/"s + ascii() + "?v=" + PACKAGE_VERSION_NUMBER_STRING;
+    }
+}
+
 //######################################################################
 // V3ErrorGuarded class functions
 //
@@ -114,6 +122,13 @@ void V3ErrorGuarded::suppressThisWarning() VL_REQUIRES(m_mutex) {
     errorSuppressed(true);
 }
 
+void V3ErrorGuarded::v3errorPrep(V3ErrorCode code) VL_REQUIRES(m_mutex) {
+    m_errorStr.str("");
+    m_errorCode = code;
+    m_errorContexted = false;
+    m_errorSuppressed = false;
+}
+
 // cppcheck-has-bug-suppress constParameter
 void V3ErrorGuarded::v3errorEnd(std::ostringstream& sstr, const string& extra)
     VL_REQUIRES(m_mutex) {
@@ -128,14 +143,18 @@ void V3ErrorGuarded::v3errorEnd(std::ostringstream& sstr, const string& extra)
         && (!debug() || debug() < 3 || m_errorCode.defaultsOff()))
         return;
     string msg = msgPrefix() + sstr.str();
+
     // If suppressed print only first line to reduce verbosity
-    if (m_errorSuppressed) {
-        string::size_type pos;
-        if ((pos = msg.find('\n')) != string::npos) {
-            msg.erase(pos, msg.length() - pos);
-            msg += "...";
-        }
+    string firstLine = msg;
+    string::size_type pos;
+    if ((pos = firstLine.find('\n')) != string::npos) {
+        firstLine.erase(pos, firstLine.length() - pos);
+        firstLine += "...";
     }
+    if (m_errorSuppressed) msg = firstLine;
+    // Suppress duplicate messages
+    if (!m_messages.insert(firstLine).second) return;
+
     string msg_additional;
     {
         string::size_type pos;
@@ -152,8 +171,6 @@ void V3ErrorGuarded::v3errorEnd(std::ostringstream& sstr, const string& extra)
         while ((pos = msg_additional.find("\n\n")) != string::npos)
             msg_additional.erase(pos + 1, 1);
     }
-    // Suppress duplicate messages
-    if (!m_messages.insert(msg).second) return;
     if (!extra.empty() && !m_errorSuppressed) {
         const string extraMsg = warnMore() + extra + "\n";
         const size_t pos = msg.find('\n');
@@ -175,13 +192,9 @@ void V3ErrorGuarded::v3errorEnd(std::ostringstream& sstr, const string& extra)
         if (m_errorCode != V3ErrorCode::EC_FATALMANY  // Not verbose on final too-many-errors error
             && !m_describedEachWarn[m_errorCode]) {
             m_describedEachWarn[m_errorCode] = true;
-            const string docUrl = "https://verilator.org/verilator_doc.html"s
-                                  + "?v=" + PACKAGE_VERSION_NUMBER_STRING;
-            const string warnUrl = "https://verilator.org/warn/"s + m_errorCode.ascii()
-                                   + "?v=" + PACKAGE_VERSION_NUMBER_STRING;
             if (m_errorCode >= V3ErrorCode::EC_FIRST_NAMED) {
                 std::cerr << warnMore() << "... For " << (anError ? "error" : "warning")
-                          << " description see " << warnUrl << endl;
+                          << " description see " << m_errorCode.url() << endl;
             } else if (m_errCount >= 1
                        && (m_errorCode == V3ErrorCode::EC_FATAL
                            || m_errorCode == V3ErrorCode::EC_FATALMANY
@@ -194,7 +207,7 @@ void V3ErrorGuarded::v3errorEnd(std::ostringstream& sstr, const string& extra)
                           << endl;
             } else if (!m_tellManual) {
                 m_tellManual = true;
-                std::cerr << warnMore() << "... See the manual at " << docUrl
+                std::cerr << warnMore() << "... See the manual at " << m_errorCode.url()
                           << " for more assistance." << endl;
             }
             if (!m_pretendError[m_errorCode] && !m_errorCode.hardError()) {
@@ -202,7 +215,7 @@ void V3ErrorGuarded::v3errorEnd(std::ostringstream& sstr, const string& extra)
                           << m_errorCode.ascii()
                           << " */\" and lint_on around source to disable this message." << endl;
                 if (m_errorCode.dangerous()) {
-                    std::cerr << warnMore() << "*** See " << warnUrl
+                    std::cerr << warnMore() << "*** See " << m_errorCode.url()
                               << " before disabling this,\n";
                     std::cerr << warnMore() << "else you may end up with different sim results."
                               << endl;
@@ -297,7 +310,6 @@ std::ostringstream& V3Error::v3errorPrepFileLine(V3ErrorCode code, const char* f
     v3errorPrep(code) << file << ":" << std::dec << line << ": ";
     return v3errorStr();
 }
-std::ostringstream& V3Error::v3errorStr() VL_REQUIRES(s().m_mutex) { return s().v3errorStr(); }
 void V3Error::v3errorEnd(std::ostringstream& sstr, const string& extra) VL_RELEASE(s().m_mutex) {
     s().v3errorEnd(sstr, extra);
     V3Error::s().m_mutex.unlock();

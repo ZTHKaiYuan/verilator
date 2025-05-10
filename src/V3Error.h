@@ -34,6 +34,9 @@
 #include <set>
 #include <sstream>
 
+class V3Error;
+class FileLine;
+
 //######################################################################
 
 class V3ErrorCode final {
@@ -72,6 +75,7 @@ public:
         ASSIGNDLY,      // Assignment delays
         ASSIGNIN,       // Assigning to input
         BADSTDPRAGMA,   // Any error related to pragmas
+        BADVLTPRAGMA,   // Unknown Verilator pragma
         BLKANDNBLK,     // Blocked and non-blocking assignments to same variable
         BLKLOOPINIT,    // Delayed assignment to array inside for loops
         BLKSEQ,         // Blocking assignments in sequential block
@@ -128,6 +132,7 @@ public:
         PINNOTFOUND,    // instance port name not found in it's module
         PKGNODECL,      // Error: Package/class needs to be predeclared
         PREPROCZERO,    // Preprocessor expression with zero
+        PROCASSINIT,    // Procedural assignment versus initialization
         PROCASSWIRE,    // Procedural assignment on wire
         PROFOUTOFDATE,  // Profile data out of date
         PROTECTED,      // detected `pragma protected
@@ -193,7 +198,7 @@ public:
             "LIFETIME", "NEEDTIMINGOPT", "NOTIMING", "PORTSHORT", "TASKNSVAR", "UNSUPPORTED",
             // Warnings
             " EC_FIRST_WARN",
-            "ALWCOMBORDER", "ASCRANGE", "ASSIGNDLY", "ASSIGNIN", "BADSTDPRAGMA",
+            "ALWCOMBORDER", "ASCRANGE", "ASSIGNDLY", "ASSIGNIN", "BADSTDPRAGMA", "BADVLTPRAGMA",
             "BLKANDNBLK", "BLKLOOPINIT", "BLKSEQ", "BSSPACE",
             "CASEINCOMPLETE", "CASEOVERLAP", "CASEWITHX", "CASEX", "CASTCONST", "CDCRSTLOGIC", "CLKDATA",
             "CMPCONST", "COLONPLUS", "COMBDLY", "CONSTRAINTIGN", "CONTASSREG", "COVERIGN",
@@ -205,7 +210,7 @@ public:
             "INCABSPATH", "INFINITELOOP", "INITIALDLY", "INSECURE",
             "LATCH", "LITENDIAN", "MINTYPMAXDLY", "MISINDENT", "MODDUP",
             "MULTIDRIVEN", "MULTITOP", "NEWERSTD", "NOLATCH", "NONSTD", "NULLPORT", "PINCONNECTEMPTY",
-            "PINMISSING", "PINNOCONNECT",  "PINNOTFOUND", "PKGNODECL", "PREPROCZERO", "PROCASSWIRE",
+            "PINMISSING", "PINNOCONNECT",  "PINNOTFOUND", "PKGNODECL", "PREPROCZERO", "PROCASSINIT", "PROCASSWIRE",
             "PROFOUTOFDATE", "PROTECTED", "RANDC", "REALCVT", "REDEFMACRO", "RISEFALLDLY",
             "SELRANGE", "SHORTREAL", "SIDEEFFECT", "SPLITVAR",
             "STATICVAR", "STMTDLY", "SYMRSVDWORD", "SYNCASYNCNET",
@@ -232,10 +237,10 @@ public:
     // Warnings we'll present to the user as errors
     // Later -Werror- options may make more of these.
     bool pretendError() const VL_MT_SAFE {
-        return (m_e == ASSIGNIN || m_e == BADSTDPRAGMA || m_e == BLKANDNBLK || m_e == BLKLOOPINIT
-                || m_e == CONTASSREG || m_e == ENCAPSULATED || m_e == ENDLABEL || m_e == ENUMVALUE
-                || m_e == IMPURE || m_e == PINNOTFOUND || m_e == PKGNODECL || m_e == PROCASSWIRE
-                || m_e == ZEROREPL  // Says IEEE
+        return (m_e == ASSIGNIN || m_e == BADSTDPRAGMA || m_e == BADVLTPRAGMA || m_e == BLKANDNBLK
+                || m_e == BLKLOOPINIT || m_e == CONTASSREG || m_e == ENCAPSULATED
+                || m_e == ENDLABEL || m_e == ENUMVALUE || m_e == IMPURE || m_e == PINNOTFOUND
+                || m_e == PKGNODECL || m_e == PROCASSWIRE || m_e == ZEROREPL  // Says IEEE
         );
     }
     // Warnings to mention manual
@@ -258,9 +263,10 @@ public:
         return (m_e == ASSIGNDLY  // More than style, but for backward compatibility
                 || m_e == BLKSEQ || m_e == DECLFILENAME || m_e == DEFPARAM || m_e == EOFNEWLINE
                 || m_e == GENUNNAMED || m_e == IMPORTSTAR || m_e == INCABSPATH
-                || m_e == PINCONNECTEMPTY || m_e == PINNOCONNECT || m_e == SYNCASYNCNET
-                || m_e == UNDRIVEN || m_e == UNUSEDGENVAR || m_e == UNUSEDLOOP
-                || m_e == UNUSEDPARAM || m_e == UNUSEDSIGNAL || m_e == VARHIDDEN);
+                || m_e == PINCONNECTEMPTY || m_e == PINNOCONNECT || m_e == PROCASSINIT
+                || m_e == SYNCASYNCNET || m_e == UNDRIVEN || m_e == UNUSEDGENVAR
+                || m_e == UNUSEDLOOP || m_e == UNUSEDPARAM || m_e == UNUSEDSIGNAL
+                || m_e == VARHIDDEN);
     }
     // Warnings that are unused only
     bool unusedError() const VL_MT_SAFE {
@@ -286,7 +292,7 @@ public:
         }
         return false;
     }
-
+    string url() const;
     static bool unusedMsg(const char* msgp) { return 0 == VL_STRCASECMP(msgp, "UNUSED"); }
 };
 constexpr bool operator==(const V3ErrorCode& lhs, const V3ErrorCode& rhs) {
@@ -299,7 +305,6 @@ inline std::ostream& operator<<(std::ostream& os, const V3ErrorCode& rhs) {
 }
 
 // ######################################################################
-class V3Error;
 
 class V3ErrorGuarded final {
     // Should only be used by V3ErrorGuarded::m_mutex is already locked
@@ -320,7 +325,7 @@ private:
         = V3ErrorCode::EC_FATAL;  // Error string being formed will abort
     bool m_errorSuppressed VL_GUARDED_BY(m_mutex)
         = false;  // Error being formed should be suppressed
-    MessagesSet m_messages VL_GUARDED_BY(m_mutex);  // What errors we've outputted
+    MessagesSet m_messages VL_GUARDED_BY(m_mutex);  // Errors outputted, to remove dups
     ErrorExitCb m_errorExitCb VL_GUARDED_BY(m_mutex)
         = nullptr;  // Callback when error occurs for dumping
     bool m_errorContexted VL_GUARDED_BY(m_mutex) = false;  // Error being formed got context
@@ -336,12 +341,7 @@ private:
     bool m_warnFatal VL_GUARDED_BY(m_mutex) = true;  // Option: --warnFatal Warnings are fatal
     std::ostringstream m_errorStr VL_GUARDED_BY(m_mutex);  // Error string being formed
 
-    void v3errorPrep(V3ErrorCode code) VL_REQUIRES(m_mutex) {
-        m_errorStr.str("");
-        m_errorCode = code;
-        m_errorContexted = false;
-        m_errorSuppressed = false;
-    }
+    void v3errorPrep(V3ErrorCode code) VL_REQUIRES(m_mutex);
     std::ostringstream& v3errorStr() VL_REQUIRES(m_mutex) { return m_errorStr; }
     void v3errorEnd(std::ostringstream& sstr, const string& extra = "") VL_REQUIRES(m_mutex);
 
@@ -358,9 +358,9 @@ public:
     bool isError(V3ErrorCode code, bool supp) VL_REQUIRES(m_mutex);
     void vlAbortOrExit() VL_REQUIRES(m_mutex);
     void errorContexted(bool flag) VL_REQUIRES(m_mutex) { m_errorContexted = flag; }
-    void incWarnings() VL_REQUIRES(m_mutex) { m_warnCount++; }
+    void incWarnings() VL_REQUIRES(m_mutex) { ++m_warnCount; }
     void incErrors() VL_REQUIRES(m_mutex) {
-        m_errCount++;
+        ++m_errCount;
         if (errorCount() == errorLimit()) {  // Not >= as would otherwise recurse
             v3errorEnd(
                 (v3errorPrep(V3ErrorCode::EC_FATALMANY),
@@ -406,6 +406,7 @@ public:
 };
 
 // ######################################################################
+
 class V3Error final {
     // Base class for any object that wants debugging and error reporting
     // CONSTRUCTORS
@@ -503,14 +504,6 @@ public:
 
     // When printing an error/warning, print prefix for multiline message
     static string warnMore() VL_REQUIRES(s().m_mutex) { return s().warnMore(); }
-    // This function should only be used when it is impossible to
-    // generate whole error message inside v3warn macros and it needs to be
-    // streamed directly to cerr.
-    // Use with caution as this function isn't MT_SAFE.
-    static string warnMoreStandalone() VL_EXCLUDES(s().m_mutex) VL_MT_UNSAFE {
-        const V3RecursiveLockGuard guard{s().m_mutex};
-        return s().warnMore();
-    }
     // This function marks place in error message from which point message
     // should be printed after information on the error code.
     // The post-processing is done in v3errorEnd function.
@@ -526,7 +519,7 @@ public:
     static std::ostringstream& v3errorPrep(V3ErrorCode code) VL_ACQUIRE(s().m_mutex);
     static std::ostringstream& v3errorPrepFileLine(V3ErrorCode code, const char* file, int line)
         VL_ACQUIRE(s().m_mutex);
-    static std::ostringstream& v3errorStr() VL_REQUIRES(s().m_mutex);
+    static std::ostringstream& v3errorStr() VL_REQUIRES(s().m_mutex) { return s().v3errorStr(); }
     // static, but often overridden in classes.
     static void v3errorEnd(std::ostringstream& sstr, const string& extra = "")
         VL_RELEASE(s().m_mutex);

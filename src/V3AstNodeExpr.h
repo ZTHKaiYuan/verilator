@@ -953,7 +953,7 @@ class AstConst final : public AstNodeExpr {
         } else if (m_num.isString()) {
             dtypeSetString();
         } else {
-            dtypeSetLogicUnsized(m_num.width(), (m_num.sized() ? 0 : m_num.widthMin()),
+            dtypeSetLogicUnsized(m_num.width(), (m_num.sized() ? 0 : m_num.widthToFit()),
                                  VSigning::fromBool(m_num.isSigned()));
         }
         m_num.nodep(this);
@@ -987,7 +987,7 @@ public:
     class VerilogStringLiteral {};  // for creator type-overload selection
     AstConst(FileLine* fl, VerilogStringLiteral, const string& str)
         : ASTGEN_SUPER_Const(fl)
-        , m_num(V3Number::VerilogStringLiteral{}, this, str) {
+        , m_num{V3Number::VerilogStringLiteral{}, this, str} {
         initWithNumber();
     }
     AstConst(FileLine* fl, uint32_t num)
@@ -1000,14 +1000,14 @@ public:
         : ASTGEN_SUPER_Const(fl)
         , m_num(this, 32, num) {
         m_num.width(32, false);
-        dtypeSetLogicUnsized(32, m_num.widthMin(), VSigning::UNSIGNED);
+        dtypeSetLogicUnsized(32, m_num.widthToFit(), VSigning::UNSIGNED);
     }
     class Signed32 {};  // for creator type-overload selection
     AstConst(FileLine* fl, Signed32, int32_t num)  // Signed 32-bit integer of specified value
         : ASTGEN_SUPER_Const(fl)
         , m_num(this, 32, num) {
         m_num.width(32, true);
-        dtypeSetLogicUnsized(32, m_num.widthMin(), VSigning::SIGNED);
+        dtypeSetLogicUnsized(32, m_num.widthToFit(), VSigning::SIGNED);
     }
     class Unsized64 {};  // for creator type-overload selection
     AstConst(FileLine* fl, Unsized64, uint64_t num)
@@ -1033,7 +1033,7 @@ public:
     class String {};  // for creator type-overload selection
     AstConst(FileLine* fl, String, const string& num)
         : ASTGEN_SUPER_Const(fl)
-        , m_num(V3Number::String{}, this, num) {
+        , m_num{V3Number::String{}, this, num} {
         dtypeSetString();
     }
     class BitFalse {};
@@ -1066,14 +1066,14 @@ public:
     class Null {};
     AstConst(FileLine* fl, Null)
         : ASTGEN_SUPER_Const(fl)
-        , m_num(V3Number::Null{}, this) {
+        , m_num{V3Number::Null{}, this} {
         dtypeSetBit();  // Events 1 bit, objects 64 bits, so autoExtend=1 and use bit here
         initWithNumber();
     }
     class OneStep {};
     AstConst(FileLine* fl, OneStep)
         : ASTGEN_SUPER_Const(fl)
-        , m_num(V3Number::OneStep{}, this) {
+        , m_num{V3Number::OneStep{}, this} {
         dtypeSetLogicSized(64, VSigning::UNSIGNED);
         initWithNumber();
     }

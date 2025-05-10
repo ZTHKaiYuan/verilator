@@ -1325,7 +1325,7 @@ class WidthVisitor final : public VNVisitor {
             } else if (nodep->num().sized()) {
                 nodep->dtypeChgWidth(nodep->num().width(), nodep->num().width());
             } else {
-                nodep->dtypeChgWidth(nodep->num().width(), nodep->num().widthMin());
+                nodep->dtypeChgWidth(nodep->num().width(), nodep->num().widthToFit());
             }
         }
         // We don't size the constant until we commit the widths, as need parameters
@@ -1671,6 +1671,20 @@ class WidthVisitor final : public VNVisitor {
             nodep->replaceWith(new AstConst(nodep->fileline(), AstConst::Signed32{}, val));
             VL_DO_DANGLING(nodep->deleteTree(), nodep);
             break;
+        }
+        case VAttrType::DIM_BITS_OR_NUMBER: {
+            // If dtype, compute DIM_BITS, else take expression as a number to use
+            if (VN_IS(nodep->fromp(), NodeExpr)) {
+                nodep->replaceWith(nodep->fromp()->unlinkFrBack());
+                VL_DO_DANGLING(pushDeletep(nodep), nodep);
+            } else {
+                AstNode* newp = new AstAttrOf{nodep->fileline(), VAttrType::DIM_BITS,
+                                              nodep->fromp()->unlinkFrBack()};
+                nodep->replaceWith(newp);
+                VL_DO_DANGLING(pushDeletep(nodep), nodep);
+                userIterateAndNext(newp, WidthVP{SELF, BOTH}.p());  // Convert AttrOf
+            }
+            return;
         }
         case VAttrType::DIM_BITS:
         case VAttrType::DIM_HIGH:
@@ -2066,8 +2080,7 @@ class WidthVisitor final : public VNVisitor {
                                              << nodep->warnMore()
                                              << "... Suggest try static cast");
         }
-        newp->dtypeFrom(nodep);
-        nodep->replaceWith(newp);
+        nodep->replaceWithKeepDType(newp);
         VL_DO_DANGLING(pushDeletep(nodep), nodep);
         userIterate(newp, m_vup);
     }
@@ -2082,6 +2095,12 @@ class WidthVisitor final : public VNVisitor {
             nodep->replaceWith(newp);
             VL_DO_DANGLING(pushDeletep(nodep), nodep);
             userIterate(newp, m_vup);
+        } else if (AstNodeDType* const refp = VN_CAST(nodep->dtp(), NodeDType)) {
+            refp->unlinkFrBack();
+            AstNode* const newp = new AstCast{nodep->fileline(), nodep->lhsp()->unlinkFrBack(),
+                                              VFlagChildDType{}, refp};
+            nodep->replaceWith(newp);
+            VL_DO_DANGLING(pushDeletep(nodep), nodep);
         } else {
             nodep->v3warn(E_UNSUPPORTED,
                           "Unsupported: Cast to " << nodep->dtp()->prettyTypeName());
@@ -2205,8 +2224,7 @@ class WidthVisitor final : public VNVisitor {
         if (m_vup->final()) {
             // CastSize not needed once sizes determined
             AstNode* const underp = nodep->lhsp()->unlinkFrBack();
-            underp->dtypeFrom(nodep);
-            nodep->replaceWith(underp);
+            nodep->replaceWithKeepDType(underp);
             VL_DO_DANGLING(pushDeletep(nodep), nodep);
         }
         // if (debug()) nodep->dumpTree("-  CastSizeOut: ");
@@ -5070,7 +5088,7 @@ class WidthVisitor final : public VNVisitor {
         }
         // Apply width
         iterateCheck(nodep, "Case expression", nodep->exprp(), CONTEXT_DET, FINAL, subDTypep,
-                     EXTEND_LHS);
+                     EXTEND_EXP);
         for (AstCaseItem* itemp = nodep->itemsp(); itemp;
              itemp = VN_AS(itemp->nextp(), CaseItem)) {
             for (AstNode *nextcp, *condp = itemp->condsp(); condp; condp = nextcp) {
@@ -5227,7 +5245,7 @@ class WidthVisitor final : public VNVisitor {
                                            << lwidth << " bits) is narrower than the stream ("
                                            << rwidth << " bits) (IEEE 1800-2023 11.4.14)");
                 }
-                if (VN_IS(lhsDTypeSkippedRefp, NodeArrayDType)) {
+                if (VN_IS(lhsDTypeSkippedRefp, UnpackArrayDType)) {
                     streamp->unlinkFrBack();
                     nodep->rhsp(new AstCvtPackedToArray{streamp->fileline(), streamp,
                                                         lhsDTypeSkippedRefp});
@@ -5235,7 +5253,6 @@ class WidthVisitor final : public VNVisitor {
             }
             if (const AstNodeStream* const streamp = VN_CAST(nodep->lhsp(), NodeStream)) {
                 const AstNodeDType* const rhsDTypep = nodep->rhsp()->dtypep()->skipRefp();
-
                 const int lwidth = widthUnpacked(streamp->lhsp()->dtypep()->skipRefp());
                 const int rwidth = widthUnpacked(rhsDTypep);
                 if (rwidth != 0 && rwidth < lwidth) {
@@ -5245,7 +5262,7 @@ class WidthVisitor final : public VNVisitor {
                                            << " bits, but source expression only provides "
                                            << rwidth << " bits (IEEE 1800-2023 11.4.14.3)");
                 }
-                if (VN_IS(rhsDTypep, NodeArrayDType)) {
+                if (VN_IS(rhsDTypep, UnpackArrayDType)) {
                     AstNodeExpr* const rhsp = nodep->rhsp()->unlinkFrBack();
                     nodep->rhsp(
                         new AstCvtArrayToPacked{rhsp->fileline(), rhsp, streamp->dtypep()});
@@ -5859,9 +5876,12 @@ class WidthVisitor final : public VNVisitor {
                 // We've resolved parameters and hit a module that we couldn't resolve.  It's
                 // finally time to report it.
                 // Note only here in V3Width as this is first visitor after V3Dead.
-                nodep->modNameFileline()->v3error("Cannot find file containing module: '"
-                                                  << nodep->modName() << "'");
-                v3Global.opt.filePathLookedMsg(nodep->modNameFileline(), nodep->modName());
+                nodep->modNameFileline()->v3error(
+                    "Cannot find file containing module: '"
+                    << nodep->modName() << "'\n"
+                    << nodep->modNameFileline()->warnContextPrimary()
+                    << V3Error::warnAdditionalInfo()
+                    << v3Global.opt.filePathLookedMsg(nodep->modNameFileline(), nodep->modName()));
             }
             if (nodep->rangep()) userIterateAndNext(nodep->rangep(), WidthVP{SELF, BOTH}.p());
             userIterateAndNext(nodep->pinsp(), nullptr);
@@ -6758,8 +6778,7 @@ class WidthVisitor final : public VNVisitor {
             if (nodep->rhsp()->width() > 32) {
                 if (shiftp && shiftp->num().mostSetBitP1() <= 32) {
                     // If (number)<<96'h1, then make it into (number)<<32'h1
-                    V3Number num(shiftp, 32, 0);
-                    num.opAssign(shiftp->num());
+                    V3Number num{shiftp, 32, shiftp->num()};
                     AstNode* const shiftrhsp = nodep->rhsp();
                     nodep->rhsp()->replaceWith(new AstConst{shiftrhsp->fileline(), num});
                     VL_DO_DANGLING(shiftrhsp->deleteTree(), shiftrhsp);
@@ -6929,8 +6948,7 @@ class WidthVisitor final : public VNVisitor {
         const int expWidth = expDTypep->width();
         if (constp && !constp->num().isNegative()) {
             // Save later constant propagation work, just right-size it.
-            V3Number num(nodep, expWidth);
-            num.opAssign(constp->num());
+            V3Number num{nodep, expWidth, constp->num()};
             num.isSigned(false);
             AstNodeExpr* const newp = new AstConst{nodep->fileline(), num};
             constp->replaceWith(newp);
@@ -7614,8 +7632,7 @@ class WidthVisitor final : public VNVisitor {
             break;
         }
         UINFO(6, "   ReplaceWithUOrSVersion: " << nodep << " w/ " << newp << endl);
-        nodep->replaceWith(newp);
-        newp->dtypeFrom(nodep);
+        nodep->replaceWithKeepDType(newp);
         VL_DO_DANGLING(pushDeletep(nodep), nodep);
         return newp;
     }
@@ -7704,8 +7721,7 @@ class WidthVisitor final : public VNVisitor {
             break;
         }
         UINFO(6, "   ReplaceWithDVersion: " << nodep << " w/ " << newp << endl);
-        nodep->replaceWith(newp);
-        newp->dtypeFrom(nodep);
+        nodep->replaceWithKeepDType(newp);
         VL_DO_DANGLING(pushDeletep(nodep), nodep);
         return newp;
     }
