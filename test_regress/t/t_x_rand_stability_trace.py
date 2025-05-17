@@ -9,13 +9,11 @@
 
 import vltest_bootstrap
 
-test.scenarios('simulator')
-test.top_filename = "t/t_assert_property.v"
+test.scenarios("vlt")
+test.top_filename = "t/t_x_rand_stability.v"
 
-test.compile(v_flags2=['+define+FAIL_ASSERT_2'], verilator_flags2=['--assert --cc'])
+test.compile(verilator_flags2=["--x-initial unique", "--trace"])
 
-test.execute(fails=True)
-
-test.file_grep(test.run_log_filename, r"'assert' failed")
+test.execute(all_run_flags=["+verilator+rand+reset+2"], expect_filename=test.golden_filename)
 
 test.passes()

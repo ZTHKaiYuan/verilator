@@ -324,7 +324,7 @@ void AstNode::debugTreeChange(const AstNode* nodep, const char* prefix, int line
 //  // Commenting out the section below may crash, as the tree state
 //  // between edits is not always consistent for printing
 //  cout<<"-treeChange: V3Ast.cpp:"<<lineno<<" Tree Change for "<<prefix<<endl;
-//  v3Global.rootp()->dumpTree("-  treeChange: ");
+//  if (debug()) v3Global.rootp()->dumpTree("-  treeChange: ");
 //  if (next||1) nodep->dumpTreeAndNext(cout, prefix);
 //  else nodep->dumpTree(prefix);
 //  nodep->checkTree();
@@ -520,6 +520,10 @@ void AstNode::replaceWith(AstNode* newp) {
     VNRelinker repHandle;
     this->unlinkFrBack(&repHandle);
     repHandle.relink(newp);
+}
+void AstNode::replaceWithKeepDType(AstNode* newp) {
+    newp->dtypeFrom(this);
+    replaceWith(newp);
 }
 
 void VNRelinker::dump(std::ostream& str) const {
@@ -1449,7 +1453,7 @@ void AstNode::v3errorEnd(std::ostringstream& str) const VL_RELEASE(V3Error::s().
     const string instanceStrExtra
         = m_fileline->warnIsOff(V3Error::s().errorCode()) ? "" : instanceStr();
     if (!m_fileline) {
-        V3Error::v3errorEnd(str, instanceStrExtra);
+        V3Error::v3errorEnd(str, instanceStrExtra, nullptr);
     } else {
         std::ostringstream nsstr;
         nsstr << str.str();
@@ -1457,7 +1461,7 @@ void AstNode::v3errorEnd(std::ostringstream& str) const VL_RELEASE(V3Error::s().
             nsstr << '\n';
             nsstr << "-node: ";
             const_cast<AstNode*>(this)->dump(nsstr);
-            nsstr << endl;
+            nsstr << '\n';
         }
         m_fileline->v3errorEnd(nsstr, instanceStrExtra);
     }

@@ -9,14 +9,13 @@
 
 import vltest_bootstrap
 
-test.scenarios('simulator')
-test.top_filename = "t/t_assert_property.v"
+test.scenarios('vlt')
+test.top_filename = 't/t_EXAMPLE.v'
 
-test.compile(v_flags2=['+define+FAIL_ASSERT_1'], verilator_flags2=['--assert --cc'])
-
-test.execute()
-
-# We expect to get a message when this assert fires:
-test.file_grep(test.run_log_filename, r'cyc != 3')
+test.run(cmd=["perl", os.environ["VERILATOR_ROOT"] + "/bin/verilator", "--threads-max-mtasks 0"],
+         logfile=test.run_log_filename,
+         fails=True,
+         expect_filename=test.golden_filename,
+         verilator_run=True)
 
 test.passes()

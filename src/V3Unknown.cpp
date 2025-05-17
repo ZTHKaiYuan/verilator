@@ -50,16 +50,18 @@ class UnknownVisitor final : public VNVisitor {
     const VNUser2InUse m_inuser2;
     static const std::string m_xrandPrefix;
 
-    // STATE
+    // STATE - across all visitors
+    VDouble0 m_statUnkVars;  // Statistic tracking
+    V3UniqueNames m_lvboundNames;  // For generating unique temporary variable names
+    std::unique_ptr<V3UniqueNames> m_xrandNames;  // For generating unique temporary variable names
+
+    // STATE - for current visit position (use VL_RESTORER)
     AstNodeModule* m_modp = nullptr;  // Current module
     AstAssignW* m_assignwp = nullptr;  // Current assignment
     AstAssignDly* m_assigndlyp = nullptr;  // Current assignment
     AstNode* m_timingControlp = nullptr;  // Current assignment's intra timing control
     bool m_constXCvt = false;  // Convert X's
     bool m_allowXUnique = true;  // Allow unique assignments
-    VDouble0 m_statUnkVars;  // Statistic tracking
-    V3UniqueNames m_lvboundNames;  // For generating unique temporary variable names
-    std::unique_ptr<V3UniqueNames> m_xrandNames;  // For generating unique temporary variable names
 
     // METHODS
 
@@ -357,10 +359,9 @@ class UnknownVisitor final : public VNVisitor {
                         nodep->fileline(),
                         new AstVarRef{nodep->fileline(), newvarp, VAccess::WRITE},
                         new AstOr{nodep->fileline(), new AstConst{nodep->fileline(), numb1},
-                                  new AstAnd{nodep->fileline(),
-                                             new AstConst{nodep->fileline(), numbx},
-                                             new AstRand{nodep->fileline(), AstRand::Reset{},
-                                                         nodep->dtypep(), true}}}}};
+                                  new AstAnd{
+                                      nodep->fileline(), new AstConst{nodep->fileline(), numbx},
+                                      new AstVarRef{nodep->fileline(), newvarp, VAccess::READ}}}}};
                 // Add inits in front of other statement.
                 // In the future, we should stuff the initp into the module's constructor.
                 AstNode* const afterp = m_modp->stmtsp()->unlinkFrBackWithNext();

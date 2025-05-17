@@ -406,6 +406,38 @@ IData VL_URANDOM_SEEDED_II(IData seed) VL_MT_SAFE {
     Verilated::threadContextp()->randSeed(static_cast<int>(seed));
     return VL_RANDOM_I();
 }
+
+IData VL_SCOPED_RAND_RESET_I(int obits, uint64_t scopeHash, uint64_t salt) VL_MT_UNSAFE {
+    if (Verilated::threadContextp()->randReset() == 0) return 0;
+    IData data = ~0;
+    if (Verilated::threadContextp()->randReset() != 1) {  // if 2, randomize
+        VlRNG rng(Verilated::threadContextp()->randSeed() ^ scopeHash ^ salt);
+        data = rng.rand64();
+    }
+    data &= VL_MASK_I(obits);
+    return data;
+}
+
+QData VL_SCOPED_RAND_RESET_Q(int obits, uint64_t scopeHash, uint64_t salt) VL_MT_UNSAFE {
+    if (Verilated::threadContextp()->randReset() == 0) return 0;
+    QData data = ~0ULL;
+    if (Verilated::threadContextp()->randReset() != 1) {  // if 2, randomize
+        VlRNG rng(Verilated::threadContextp()->randSeed() ^ scopeHash ^ salt);
+        data = rng.rand64();
+    }
+    data &= VL_MASK_Q(obits);
+    return data;
+}
+
+WDataOutP VL_SCOPED_RAND_RESET_W(int obits, WDataOutP outwp, uint64_t scopeHash,
+                                 uint64_t salt) VL_MT_UNSAFE {
+    if (Verilated::threadContextp()->randReset() != 2) { return VL_RAND_RESET_W(obits, outwp); }
+    VlRNG rng(Verilated::threadContextp()->randSeed() ^ scopeHash ^ salt);
+    for (int i = 0; i < VL_WORDS_I(obits) - 1; ++i) outwp[i] = rng.rand64();
+    outwp[VL_WORDS_I(obits) - 1] = rng.rand64() & VL_MASK_E(obits);
+    return outwp;
+}
+
 IData VL_RAND_RESET_I(int obits) VL_MT_SAFE {
     if (Verilated::threadContextp()->randReset() == 0) return 0;
     IData data = ~0;
@@ -577,14 +609,14 @@ WDataOutP VL_POW_WWW(int obits, int, int rbits, WDataOutP owp, const WDataInP lw
     const int owords = VL_WORDS_I(obits);
     VL_DEBUG_IFDEF(assert(owords <= VL_MULS_MAX_WORDS););
     owp[0] = 1;
-    for (int i = 1; i < VL_WORDS_I(obits); i++) owp[i] = 0;
+    for (int i = 1; i < VL_WORDS_I(obits); ++i) owp[i] = 0;
     // cppcheck-has-bug-suppress variableScope
     VlWide<VL_MULS_MAX_WORDS> powstore;  // Fixed size, as MSVC++ doesn't allow [words] here
     VlWide<VL_MULS_MAX_WORDS> lastpowstore;  // Fixed size, as MSVC++ doesn't allow [words] here
     VlWide<VL_MULS_MAX_WORDS> lastoutstore;  // Fixed size, as MSVC++ doesn't allow [words] here
     // cppcheck-has-bug-suppress variableScope
     VL_ASSIGN_W(obits, powstore, lwp);
-    for (int bit = 0; bit < rbits; bit++) {
+    for (int bit = 0; bit < rbits; ++bit) {
         if (bit > 0) {  // power = power*power
             VL_ASSIGN_W(obits, lastpowstore, powstore);
             VL_MUL_W(owords, powstore, lastpowstore, lastpowstore);
@@ -1700,6 +1732,48 @@ IData VL_SSCANF_INNX(int, const std::string& ld, const std::string& format, int 
     return got;
 }
 
+// MurmurHash64A
+uint64_t VL_HASH(const char* key) VL_PURE {
+    const size_t len = strlen(key);
+    const uint64_t seed = 0;
+    const uint64_t m = 0xc6a4a7935bd1e995ULL;
+    const int r = 47;
+
+    uint64_t h = seed ^ (len * m);
+
+    const uint64_t* data = (const uint64_t*)key;
+    const uint64_t* end = data + (len / 8);
+
+    while (data != end) {
+        uint64_t k = *data++;
+
+        k *= m;
+        k ^= k >> r;
+        k *= m;
+
+        h ^= k;
+        h *= m;
+    }
+
+    const unsigned char* data2 = (const unsigned char*)data;
+
+    switch (len & 7) {
+    case 7: h ^= uint64_t(data2[6]) << 48; /* fallthrough */
+    case 6: h ^= uint64_t(data2[5]) << 40; /* fallthrough */
+    case 5: h ^= uint64_t(data2[4]) << 32; /* fallthrough */
+    case 4: h ^= uint64_t(data2[3]) << 24; /* fallthrough */
+    case 3: h ^= uint64_t(data2[2]) << 16; /* fallthrough */
+    case 2: h ^= uint64_t(data2[1]) << 8; /* fallthrough */
+    case 1: h ^= uint64_t(data2[0]); h *= m; /* fallthrough */
+    };
+
+    h ^= h >> r;
+    h *= m;
+    h ^= h >> r;
+
+    return h;
+}
+
 IData VL_FREAD_I(int width, int array_lsb, int array_size, void* memp, IData fpi, IData start,
                  IData count) VL_MT_SAFE {
     // While threadsafe, each thread can only access different file handles
@@ -1770,7 +1844,7 @@ std::string VL_STACKTRACE_N() VL_MT_SAFE {
     if (!strings) return "Unable to backtrace\n";
 
     std::string result = "Backtrace:\n";
-    for (int j = 0; j < nptrs; j++) result += std::string{strings[j]} + "\n"s;
+    for (int j = 0; j < nptrs; ++j) result += std::string{strings[j]} + "\n"s;
     free(strings);
     return result;
 }
@@ -2042,7 +2116,7 @@ static const char* formatBinary(int nBits, uint32_t bits) {
     assert((nBits >= 1) && (nBits <= 32));
 
     static thread_local char t_buf[64];
-    for (int i = 0; i < nBits; i++) {
+    for (int i = 0; i < nBits; ++i) {
         const bool isOne = bits & (1 << (nBits - 1 - i));
         t_buf[i] = (isOne ? '1' : '0');
     }
