@@ -425,7 +425,7 @@ AstConst* AstConst::parseParamLiteral(FileLine* fl, const string& literal) {
         // the Verilog literal parser.
         char* endp;
         const int v = strtol(literal.c_str(), &endp, 0);
-        if ((v != 0) && (endp[0] == 0)) {  // C literal
+        if ((v != 0) && (v != 1) && (endp[0] == 0)) {  // C literal
             return new AstConst{fl, AstConst::Signed32{}, v};
         } else {  // Try a Verilog literal (fatals if not)
             return new AstConst{fl, AstConst::StringToParse{}, literal.c_str()};
@@ -1034,11 +1034,11 @@ uint32_t AstNodeDType::arrayUnpackedElements() const {
     return entries;
 }
 
-std::pair<uint32_t, uint32_t> AstNodeDType::dimensions(bool includeBasic) {
+std::pair<uint32_t, uint32_t> AstNodeDType::dimensions(bool includeBasic) const {
     // How many array dimensions (packed,unpacked) does this Var have?
     uint32_t packed = 0;
     uint32_t unpacked = 0;
-    for (AstNodeDType* dtypep = this; dtypep;) {
+    for (const AstNodeDType* dtypep = this; dtypep;) {
         dtypep = dtypep->skipRefp();  // Skip AstRefDType/AstTypedef, or return same node
         if (const AstNodeArrayDType* const adtypep = VN_CAST(dtypep, NodeArrayDType)) {
             if (VN_IS(adtypep, PackArrayDType)) {
