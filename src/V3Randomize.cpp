@@ -2180,6 +2180,7 @@ class CaptureVisitor final : public VNVisitor {
     std::map<const AstVar*, AstVar*> m_varCloneMap;  // Map original var nodes to their clones
     std::set<AstNode*> m_ignore;  // Nodes to ignore for capturing
     AstVar* m_thisp = nullptr;  // Variable for outer context's object, if necessary
+    bool m_staticContext = false;  // True when capturing from a static function context
 
     // METHODS
 
@@ -2252,6 +2253,11 @@ class CaptureVisitor final : public VNVisitor {
         if (varIsParam) return CaptureMode::CAP_VALUE;
         // Static var in function (will not be inlined, because it's in class)
         if (callerIsClass && varIsFuncLocal) return CaptureMode::CAP_VALUE;
+        // Static class members in static context don't need 'this' capture;
+        // V3Class will move both the function and the member to __Vclpkg
+        if (m_staticContext && callerIsClass && varIsFieldOfCaller
+            && varRefp->varp()->lifetime().isStatic())
+            return CaptureMode::CAP_NO;
         if (callerIsClass && varIsFieldOfCaller) return CaptureMode::CAP_THIS;
         UASSERT_OBJ(!callerIsClass, varRefp, "Invalid reference?");
         return CaptureMode::CAP_VALUE;
@@ -2372,10 +2378,12 @@ class CaptureVisitor final : public VNVisitor {
     void visit(AstNode* nodep) override { iterateChildren(nodep); }
 
 public:
-    explicit CaptureVisitor(AstNode* const nodep, AstNodeModule* callerp, AstClass* const targetp)
+    explicit CaptureVisitor(AstNode* const nodep, AstNodeModule* callerp, AstClass* const targetp,
+                            bool staticContext = false)
         : m_argsp{nullptr}
         , m_callerp{callerp}
-        , m_targetp{targetp} {
+        , m_targetp{targetp}
+        , m_staticContext{staticContext} {
         iterateAndNextNull(nodep);
     }
 
@@ -3771,9 +3779,16 @@ class RandomizeVisitor final : public VNVisitor {
         if (nodep->classOrPackagep() && nodep->classOrPackagep()->name() == "std") {
             // Handle std::randomize; create wrapper function that calls basicStdRandomization on
             // each varref argument, then transform nodep to call that wrapper
+            const bool inStaticContext = m_ftaskp && m_ftaskp->isStatic();
             AstVar* const stdrand = createStdRandomGenerator(m_modp);
             AstFunc* const randomizeFuncp = V3Randomize::newRandomizeStdFunc(
                 m_memberMap, m_modp, m_inlineUniqueStdName.get(nodep));
+            // When called from a static function, mark helper and stdrand as static
+            // so V3Class moves them to __Vclpkg alongside the calling function
+            if (inStaticContext) {
+                stdrand->lifetime(VLifetime::STATIC_EXPLICIT);
+                randomizeFuncp->isStatic(true);
+            }
             randomizeFuncp->addStmtsp(
                 new AstAssign{nodep->fileline(),
                               new AstVarRef{nodep->fileline(), VN_AS(randomizeFuncp->fvarp(), Var),
@@ -3829,7 +3844,8 @@ class RandomizeVisitor final : public VNVisitor {
             }
             if (withp) {
                 FileLine* const fl = nodep->fileline();
-                withCapturep = std::make_unique<CaptureVisitor>(withp->exprp(), m_modp, nullptr);
+                withCapturep = std::make_unique<CaptureVisitor>(withp->exprp(), m_modp, nullptr,
+                                                                inStaticContext);
                 withCapturep->addFunctionArguments(randomizeFuncp);
                 // Clear old constraints and variables for std::randomize with clause
                 if (stdrand) {
